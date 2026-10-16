@@ -102,7 +102,13 @@ def main() -> int:
         status, body = call("GET", f"/api/knowledge/status/{task_id}", token=admin_token)
         task = body.get("data") or {}
         check("任务：可查询导入任务", body.get("code") == 0 and task.get("taskId") == task_id)
-        check("任务：当前停留在 pending（执行引擎见 T-12）", task.get("status") == "pending" and task.get("stage") == "pending", f"{task.get('status')}/{task.get('stage')}")
+        # 上传后任务立即进入执行引擎，本脚本只校验状态合法；
+        # 完整的阶段推进与入库结果由 scripts/smoke_test_import.py 覆盖。
+        check(
+            "任务：状态合法（pending/running/done/failed）",
+            task.get("status") in {"pending", "running", "done", "failed"},
+            f"{task.get('status')}/{task.get('stage')}",
+        )
 
         # ---------- T-10 编辑（PATCH 语义） ----------
         status, body = call("PUT", f"/api/knowledge/{doc_id}", token=admin_token, body={"title": "差旅报销标准（2026版）", "category": "财务制度"})

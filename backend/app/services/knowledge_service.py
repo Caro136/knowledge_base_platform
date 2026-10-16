@@ -367,13 +367,45 @@ class KnowledgeService:
 
 
 def _dispatch_import(task_ids: list[str]) -> None:
-    """把导入任务交给执行引擎。
+    """把导入任务交给执行引擎（T-12 起真实执行）。
 
-    T-12（导入 DAG）实现后在
-    此触发后台执行；当前阶段任务停留在 pending 状态，
-    前端会看到「处理中」但不会推进——这是预期行为。
+    在线程池中异步执行导入 DAG，本函数立即返回，不阻塞上传接口。
+    若执行引擎不可用（依赖缺失等），显式把任务标记为失败，
+    而不是让任务永远停留在 pending 状态。
     """
-    logger.info("已登记导入任务 %d 个，等待执行引擎接入（T-12）", len(task_ids))
+    try:
+        from app.processor.runner import submit_import
+    except Exception as exc:  # noqa: BLE001
+        _mark_dispatch_failed(task_ids, f"导入执行引擎不可用：{exc}")
+        return
+
+    for task_id in task_ids:
+        submit_import(task_id)
+    logger.info("已提交 %d 个导入任务到执行引擎", len(task_ids))
+
+
+def _mark_dispatch_failed(task_ids: list[str], reason: str) -> None:
+    """调度失败时把任务与知识单元标记为失败，原因写入任务详情。"""
+    from datetime import datetime
+
+    from app.db.session import SessionLocal
+    from app.models import DOC_STATUS_FAILED, IMPORT_STATUS_FAILED, KbImportTask
+
+    logger.error("提交导入任务失败：%s", reason)
+    with SessionLocal() as db:
+        for task_id in task_ids:
+            task = db.scalar(select(KbImportTask).where(KbImportTask.task_id == task_id))
+            if task is None:
+                continue
+            task.status = IMPORT_STATUS_FAILED
+            task.stage = "failed"
+            task.error_msg = reason[:500]
+            task.finished_at = datetime.now()
+
+            doc = db.scalar(select(KbDocument).where(KbDocument.doc_id == task.doc_id))
+            if doc is not None:
+                doc.status = DOC_STATUS_FAILED
+        db.commit()
 
 
 def _purge_vectors(doc_id: str) -> None:

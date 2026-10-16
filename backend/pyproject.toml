@@ -17,6 +17,11 @@ dependencies = [
     # T-11：对象存储客户端 + 文件上传表单解析
     "minio>=7.2",
     "python-multipart>=0.0.9",
+    # T-12：导入工作流编排
+    "langgraph>=0.2",
+    # T-13：向量库客户端 + BGE-M3 稠密/稀疏嵌入（会带入 torch / transformers）
+    "pymilvus>=2.4",
+    "FlagEmbedding>=1.2",
 ]
 
 # 说明：本项目以"应用"形式运行（python -m app.main），无需打包安装，

@@ -700,6 +700,10 @@ sequenceDiagram
 | **I-03** | local-stack 端口 | 3306 / 27017 / 19530 / 8000 | 3307 / 27018 / 19531 / 8001 | 避免与宿主机既有服务冲突 |
 | **I-04** | 数据库账号 | 由 compose 环境变量内建 kb 账号 | `.env` 指向既有实例（默认 root）；另提供 `scripts/init_mysql.sql` 建库并可选创建 kb 账号 | 复用既有实例时无法由容器初始化账号与库 |
 | **I-05** | 日志编码 | 未涉及 | 输出被重定向（管道/文件）时强制 UTF-8，终端直连保留系统编码 | 修复 Windows 下 cp936 编码导致的中文日志乱码 |
+| **I-06** | 嵌入/重排运行设备 | C2：内网单机 + GPU，模型本地 GPU 部署 | 由配置决定（`BGE_DEVICE` / `BGE_RERANKER_DEVICE`），当前 `.env` 配置为 **cpu** | 用户配置；宿主机为 RTX 3050 Ti（4GB 显存），BGE-M3 与 reranker-large 同卡并存有显存风险。**代码不硬编码设备**，改配置即可切到 `cuda:0` |
+| **I-07** | 向量库实例 | 本项目部署 | 复用宿主机既有 Milvus（19530），仅在其内创建 `kb_chunks` collection | 与 I-02 同源：复用既有服务 |
+| **I-08** | Collection 一致性级别 | 未指定 | `kb_chunks` 显式使用 **Strong** 一致性（已存在的 collection 启动时自动对齐） | Milvus 默认 Bounded 允许「删除后仍短暂读到旧数据」，实测删除知识单元后切片仍可见数秒。知识库场景应保证删除即不可检索，故收紧为强一致 |
+| **I-09** | 解析服务上传方式 | 未指定 | 用 `http.client` 手工发起 PUT（先不带 `Content-Type`，失败再带类型重试） | OSS 预签名 URL 的签名与 Content-Type 绑定，而 `urllib` 会自动注入该头、`requests` 受系统代理影响；实测 403 均由此产生 |
 
 **实施新增的支撑产物**（原任务分解未列，实施需要）：
 

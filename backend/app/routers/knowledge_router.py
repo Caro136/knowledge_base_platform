@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+import mimetypes
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.response import ok
@@ -78,6 +81,32 @@ def detail(
     _: User = Depends(require_any_permission(*_READ_PERMS)),
 ) -> dict:
     return ok(KnowledgeService.detail(db, doc_id))
+
+
+@router.get("/{doc_id}/assets/{name}", summary="知识单元图片资源（答案配图）")
+def asset(
+    doc_id: str,
+    name: str,
+    _: User = Depends(require_any_permission(*_READ_PERMS)),
+) -> Response:
+    """按文件名返回图片内容。
+
+    仅允许访问该知识单元目录下的图片：文件名经 ``Path(...).name`` 归一化，
+    存储层还会再校验一次路径越界。
+    """
+    from urllib.parse import quote
+
+    from app.services.storage_service import get_storage
+
+    safe_name = Path(name).name
+    key = f"documents/{doc_id}/images/{safe_name}"
+    data = get_storage().get(key)
+    media_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(safe_name)}"},
+    )
 
 
 @router.put("/{doc_id}", summary="编辑知识单元")

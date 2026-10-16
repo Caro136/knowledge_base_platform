@@ -49,7 +49,9 @@ knowledge_base_platform/
 │   │   ├── db/               声明基类、会话管理、建表工具
 │   │   ├── models/           ORM 模型（权限域 / 知识域 / 运营沉淀域）
 │   │   ├── schemas/          Pydantic 请求响应模型
-│   │   ├── services/         领域服务（认证 / 组织权限 / 知识管理 / 对象存储）
+│   │   ├── processor/        导入流程（LangGraph 图 / 节点 / 任务调度器）
+│   │   ├── utils/            工具（文本切片 / 模型客户端 / MinerU 客户端）
+│   │   ├── services/         领域服务（认证 / 组织权限 / 知识 / 向量 / 对象存储）
 │   │   ├── routers/          接口层（认证 / 菜单 / 用户 / 角色 / 部门 / 健康检查）
 │   │   ├── deps.py           依赖注入：当前用户与操作权限校验
 │   │   ├── main.py           应用入口
@@ -103,7 +105,8 @@ uv run python -m app.main   # 启动，默认 http://127.0.0.1:8080
 curl http://127.0.0.1:8080/healthz          # 存活探针
 curl http://127.0.0.1:8080/healthz/ready    # 就绪探针（检查 MySQL）
 uv run python -m scripts.smoke_test_api         # 认证与组织权限冒烟测试（31 项）
-uv run python -m scripts.smoke_test_knowledge   # 知识台账与导入任务冒烟测试（28 项）
+uv run python -m scripts.smoke_test_knowledge   # 知识台账与上传冒烟测试（28 项）
+uv run python -m scripts.smoke_test_import      # 导入流程冒烟测试（直读路径 14 项）
 ```
 
 接口文档：http://127.0.0.1:8080/docs
@@ -140,7 +143,9 @@ cd frontend && npm run build
 | T-09 | 前端组织管理页：部门树维护、用户管理、角色管理与权限分配树 | ✅ |
 | T-10 | 知识单元 CRUD：台账检索、编辑（PATCH 语义）、启停用、删除级联清理、格式清单 | ✅ |
 | T-11 | 上传与任务登记：批量上传、格式白名单、对象存储落地、doc_id 与任务表 | ✅ |
-| T-12 ~ T-37 | 导入解析 DAG、鉴权引擎、问答、看板、知识沉淀、端到端交付 | ⏳ |
+| T-12 | 导入 DAG：格式路由、MinerU 云解析、图片语义化、表格线性化、按标题切片 | ✅ |
+| T-13 | 向量化与入库：BGE-M3 稠密+稀疏向量、Milvus 写入、`doc_id` 锚点、幂等重建 | ✅ |
+| T-14 ~ T-37 | 鉴权引擎、问答、看板、知识沉淀、端到端交付 | ⏳ |
 
 > - **T-05~T-08**：31 项冒烟测试通过（`scripts/smoke_test_api.py`）——登录、越权拦截（20002）、
 >   权限点与菜单裁剪、组织 CRUD、角色授权读写、参数校验与测试数据清理。
@@ -148,8 +153,24 @@ cd frontend && npm run build
 > - **T-10/T-11**：28 项冒烟测试通过（`scripts/smoke_test_knowledge.py`）——7 类格式清单、
 >   批量上传（部分成功）、MinIO 实际写入、台账与详情、编辑、导入任务查询、
 >   删除级联清理（对象存储对象与权限条目均已清除）、越权拦截。
-> - 上传后的任务**停留在 `pending`**：导入执行引擎属 T-12 范围，当前仅完成"任务登记"，
->   前端会显示「处理中」但不会推进，这是预期行为。
+> - **T-12/T-13**：直读路径 14 项 + 解析路径 13 项冒烟测试通过
+>   （`scripts/smoke_test_import.py`）——导入任务阶段推进、表格线性化、
+>   稠密（1024 维）与稀疏向量入库、`doc_id` 权限锚点、知识单元状态回填、
+>   删除时向量级联清理。解析路径由 MinerU 云 API 实测完成。
+> - **待验证**：图片类知识的语义化（受视觉模型配置阻塞，见下方待确认第 1 条）。
+
+### 模型服务验证
+
+```bash
+# 直读路径（不依赖外部服务）
+uv run python -m scripts.smoke_test_import
+
+# 解析路径：现场生成 .docx 样本，走 MinerU 云解析
+uv run python -m scripts.smoke_test_import --sample-docx
+
+# 解析路径：指定本地文件
+uv run python -m scripts.smoke_test_import --file <文件路径>
+```
 
 ## 已实现接口
 
@@ -172,6 +193,7 @@ cd frontend && npm run build
 | GET | `/api/knowledge/status/{task_id}` | `knowledge:*` | 导入任务阶段与状态 |
 | GET | `/api/knowledge/list` | `knowledge:list` 等 | 知识单元台账（分页、多条件筛选、含权限摘要） |
 | GET/PUT/DELETE | `/api/knowledge/{doc_id}` | `knowledge:query/update/delete` | 详情 / 编辑（PATCH 语义）/ 删除（级联清理） |
+| GET | `/api/knowledge/{doc_id}/assets/{name}` | `knowledge:*` | 知识单元图片资源（答案配图，返回图片流） |
 | GET | `/healthz`、`/healthz/ready` | 公开 | 健康检查 |
 
 ## 关键约定
@@ -185,11 +207,18 @@ cd frontend && npm run build
 
 ## 待确认事项
 
-PRD §11 与 SPEC §11 列出了仍需业务方确认的事项，其中影响架构的三项：
+PRD §11 与 SPEC §11 列出了仍需业务方确认的事项，其中亟待处理的：
 
-1. LLM / VLM 供应商与文档解析服务选型，以及**内网是否允许出网**
-2. 非功能指标（并发、知识库规模、响应时长目标）
-3. 「切片调整」的交互粒度（是否需要切片级编辑并写回向量库）
+1. **视觉模型配置疑似有误**：`.env` 中 `VLM_MODEL=qwen-image-3.0-pro`，实测该模型拒绝图片输入
+   （DashScope 返回 `invalid_parameter_error`）。`qwen-image` 系列是**文生图**模型，
+   图片理解应使用视觉理解模型（如 `qwen-vl-max` / `qwen3-vl-flash`）；
+   且当前 `VLM_API_KEY` 格式（`sk-ws-...`）与标准 DashScope Key 不同，
+   用 `qwen-vl-plus` / `qwen3-vl-flash` 测试均返回 `Model not exist`。
+   在修正前，**图片类知识无法语义化**（T-12 该环节会记录警告，普通文档仅损失配图信息）。
+2. 嵌入与重排当前运行在 **CPU**（`.env` 的 `BGE_DEVICE=cpu`）：导入时向量化耗时明显高于 GPU。
+   宿主机为 RTX 3050 Ti（4GB），如需切到 GPU 请改为 `cuda:0` 并评估显存。
+3. 非功能指标（并发、知识库规模、响应时长目标）。
+4. 「切片调整」的交互粒度（是否需要切片级编辑并写回向量库）。
 
 ## 许可证
 

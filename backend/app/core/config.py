@@ -94,10 +94,20 @@ class Settings(BaseSettings):
     # ---------- 文档解析服务 ----------
     DOC_PARSE_BASE_URL: str = ""
     DOC_PARSE_API_TOKEN: str = ""
+    DOC_PARSE_POLL_INTERVAL_SECONDS: int = 3
+    DOC_PARSE_TIMEOUT_SECONDS: int = 600
 
-    # ---------- 本地模型权重 ----------
+    # ---------- 本地模型权重（GPU/CPU 由配置决定，禁止硬编码） ----------
     EMBEDDING_MODEL_PATH: str = ""
     RERANK_MODEL_PATH: str = ""
+    #: 嵌入模型运行设备："cpu" 或 "cuda:0"
+    BGE_DEVICE: str = "cpu"
+    BGE_FP16: bool = False
+    #: 重排模型运行设备
+    BGE_RERANKER_DEVICE: str = "cpu"
+    BGE_RERANKER_FP16: bool = False
+    #: 嵌入推理批大小
+    EMBEDDING_BATCH_SIZE: int = 8
 
     # ---------- 检索参数 ----------
     RETRIEVE_TOP_K: int = 5
