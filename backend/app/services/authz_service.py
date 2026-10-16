@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,6 +30,7 @@ from app.models import (
     PERM_ROLE,
     PERM_USER,
     KbDocPerm,
+    KbFaqPerm,
     User,
 )
 from app.schemas.authz import AuthzExplainOut
@@ -90,6 +92,48 @@ class AuthzService:
         except Exception:  # noqa: BLE001
             # 安全降级：鉴权链路出错时拒绝全部，绝不放行
             logger.exception("鉴权过程异常，安全降级为全部拒绝（候选 %d 个）", len(unique))
+            return [], unique
+
+    @staticmethod
+    def filter_faq_ids(db: Session, user: User | None, faq_ids: list[int]) -> tuple[list[int], list[int]]:
+        """FAQ 的数据权限过滤。
+
+        ⚠️ 语义与知识单元**相反**：FAQ 未配置任何权限记录时视为**公开可见**
+        （PRD Q8 待确认，此处跟随参考基线）。若评审要求改为「拒绝优先」，
+        只需把下面 ``not perms`` 分支改为 denied 即可，改动点集中在一处。
+        """
+        unique = list(dict.fromkeys(faq_ids or []))
+        if not unique:
+            return [], []
+
+        try:
+            if user is None:
+                return [], unique
+            if user.is_super:
+                return unique, []
+
+            dept_ids, role_ids, uid = user_scope(user)
+            rows = db.scalars(select(KbFaqPerm).where(KbFaqPerm.faq_id.in_(unique))).all()
+
+            grouped: dict[int, list[KbFaqPerm]] = defaultdict(list)
+            for row in rows:
+                grouped[row.faq_id].append(row)
+
+            allowed: list[int] = []
+            denied: list[int] = []
+            for faq_id in unique:
+                perms = grouped.get(faq_id)
+                if not perms:
+                    allowed.append(faq_id)  # 未配置 = 公开
+                    continue
+                if any(_match_reason(row, dept_ids, role_ids, uid) for row in perms):
+                    allowed.append(faq_id)
+                else:
+                    denied.append(faq_id)
+            return allowed, denied
+
+        except Exception:  # noqa: BLE001
+            logger.exception("FAQ 鉴权异常，安全降级为全部拒绝")
             return [], unique
 
     @staticmethod

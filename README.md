@@ -108,6 +108,7 @@ uv run python -m scripts.smoke_test_api         # 认证与组织权限（31 项
 uv run python -m scripts.smoke_test_knowledge   # 知识台账与上传（28 项）
 uv run python -m scripts.smoke_test_authz       # 数据权限鉴权（23 项）
 uv run python -m scripts.smoke_test_chat        # AI 鉴权问答（22 项）
+uv run python -m scripts.smoke_test_precipitation  # 知识沉淀闭环（22 项）
 uv run python -m scripts.smoke_test_import      # 导入流程·直读路径（14 项）
 ```
 
@@ -118,7 +119,7 @@ uv run python -m scripts.smoke_test_import      # 导入流程·直读路径（1
 ```bash
 cd frontend
 npm install                 # 已配置 npmmirror 镜像，见 .npmrc
-npm run dev                 # http://127.0.0.1:5173（/api 自动代理到 8080）
+npm run dev                 # http://127.0.0.1:5175（/api 自动代理到 8080）
 ```
 
 生产构建后由后端直接托管：
@@ -153,7 +154,11 @@ cd frontend && npm run build
 | T-14/T-15 | 前端知识管理页：台账、拖拽导入与进度、编辑删除、批量赋权入口 | ✅ |
 | T-18 | 权限实体选择器组件（知识单元与 FAQ 共用） | ✅ |
 | T-26 | 前端问答工作台：SSE 流式渲染、引用溯源、受限提示、多会话 | ✅ |
-| T-25、T-27 ~ T-37 | FAQ 缓存、运营看板、知识沉淀、端到端交付 | ⏳ |
+| T-27（埋点部分） | 问答流水落库与 Token 用量统计（按决策 D3 不记录拦截明细） | ✅ |
+| T-25 / T-30 / T-31 | FAQ 挖掘与快速应答缓存：频次聚合、候选推荐、审核发布、毫秒级命中 | ✅ |
+| T-32 / T-33 | 知识缺口识别（决策 D2 三条件）、清单与转建补充任务 | ✅ |
+| T-34 | 前端沉淀页：FAQ 审核区 + 知识缺口清单 | ✅ |
+| T-28 / T-29、T-35 ~ T-37 | 看板聚合与图表、端到端交付 | ⏳ |
 
 > - **T-05~T-08**：31 项冒烟测试通过（`scripts/smoke_test_api.py`）——登录、越权拦截（20002）、
 >   权限点与菜单裁剪、组织 CRUD、角色授权读写、参数校验与测试数据清理。
@@ -183,7 +188,7 @@ cd frontend && npm run build
 # 终端 A
 cd backend && uv run python -m app.main
 # 终端 B
-cd frontend && npm run dev        # 打开 http://127.0.0.1:5173
+cd frontend && npm run dev        # 打开 http://127.0.0.1:5175
 ```
 
 1. 用 `admin` 登录 → 侧边栏出现全部菜单；
@@ -191,7 +196,11 @@ cd frontend && npm run dev        # 打开 http://127.0.0.1:5173
 3. 选中该知识单元 → 「数据权限」→ 勾选部门/角色/个人 → 保存 → 台账的权限标签应即时更新；
 4. 用另一个账号登录 → 侧边栏与按钮应只保留被授权的项；
 5. **智能问答** → 就知识库内的内容提问 → 应看到流式输出与「引用来源」列表（悬浮可看切片摘录）；
-6. 向无权限的账号提问受限话题 → 应出现黄色权限受限提示，且不产生正文。
+6. 向无权限的账号提问受限话题 → 应出现黄色权限受限提示，且不产生正文；
+7. **FAQ 沉淀** → 反复提问同一问题达到阈值（默认 5 次）→ 「FAQ 审核」应出现自动生成的候选 →
+   编辑答案并发布 → 再问同一问题应**秒回**且无流式过程；
+8. **知识缺口** → 提一个知识库完全没覆盖的问题 → 「知识缺口」应出现该问题与频次 →
+   「转建补充任务」应生成任务并从待处理清单中移除。
 
 ### 模型服务验证
 
@@ -232,6 +241,14 @@ uv run python -m scripts.smoke_test_import --file <文件路径>
 | GET | `/api/chat/stream/{task_id}` | `ai:chat` | SSE 流：stage / delta / references / notice / done |
 | GET | `/api/chat/sessions` | `ai:chat` | 当前用户的会话列表 |
 | GET/DELETE | `/api/chat/history/{session_id}` | `ai:chat` | 会话消息历史 / 删除会话 |
+| GET | `/api/precipitation/faq/list` | `faq:list` | 候选与已发布 FAQ 列表 |
+| GET | `/api/precipitation/faq/published` | `ai:chat` | 已发布 FAQ（对话台常见问题） |
+| PUT | `/api/precipitation/faq/{id}/audit` | `faq:audit` | 审核发布 / 驳回 |
+| DELETE | `/api/precipitation/faq/{id}` | `faq:delete` | 删除 FAQ（不再命中缓存） |
+| GET/POST | `/api/precipitation/faq/{id}/perms`、`/faq/perms/assign` | `faq:audit` | FAQ 数据权限（清空即公开） |
+| GET | `/api/precipitation/gap/list` | `gap:list` | 知识缺口清单 |
+| PUT | `/api/precipitation/gap/{id}/resolve` | `gap:handle` | 标记缺口已解决 |
+| POST | `/api/precipitation/gap/{id}/task` | `gap:handle` | 缺口转建知识补充任务 |
 | GET | `/healthz`、`/healthz/ready` | 公开 | 健康检查 |
 
 ## 关键约定

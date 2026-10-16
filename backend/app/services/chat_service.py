@@ -26,10 +26,11 @@ from sqlalchemy.orm import Session
 
 from app.core.codes import Code
 from app.core.exceptions import BizError
+from app.db.session import SessionLocal
 from app.models import User
 from app.processor.query.graph import get_query_graph
 from app.schemas.chat import ChatQueryIn, ChatQueryOut, ReferenceOut
-from app.services import session_service
+from app.services import faq_service, ops_service, session_service
 from app.utils import llm_client
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,26 @@ async def prepare_query(db: Session, user: User, payload: ChatQueryIn) -> ChatQu
     with _tasks_lock:
         _tasks[task.task_id] = task
 
+    # FAQ 快速应答：命中即直接返回人工审定的标准答案，
+    # 跳过整条检索与生成流程（FR-47）
+    started = time.perf_counter()
+    cached = faq_service.match_published(db, user, payload.question)
+    if cached is not None:
+        _emit(task, "stage", {"stage": "faq_cache", "label": "命中常见问题缓存"})
+        _finalize(task, cached.answer or "")
+        ops_service.record_access(
+            db,
+            user=user,
+            session_id=session_id,
+            question=payload.question,
+            hit=True,
+            faq_hit=True,
+            is_gap=False,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+        logger.info("FAQ 缓存命中：%s", (cached.question or "")[:30])
+        return ChatQueryOut(task_id=task.task_id, session_id=session_id)
+
     thread = threading.Thread(
         target=_run_query, args=(task,), name=f"kb-chat-{task.task_id[:8]}", daemon=True
     )
@@ -131,6 +152,12 @@ async def prepare_query(db: Session, user: User, payload: ChatQueryIn) -> ChatQu
 
 def _run_query(task: StreamTask) -> None:
     """在工作线程中执行查询图与流式生成。"""
+    started = time.perf_counter()
+    usage: dict[str, Any] = {}
+    recalled: list[str] = []
+    authorized: list[str] = []
+    is_gap = False
+
     try:
         _emit(task, "stage", {"stage": "retrieving", "label": "检索知识库并校验权限"})
 
@@ -143,6 +170,14 @@ def _run_query(task: StreamTask) -> None:
         }
         result = get_query_graph().invoke(state)
 
+        recalled = [
+            item["doc_id"] for item in (result.get("fused_chunks") or []) if item.get("doc_id")
+        ]
+        authorized = [
+            item["doc_id"] for item in (result.get("authorized_chunks") or []) if item.get("doc_id")
+        ]
+        denied = result.get("denied_doc_ids") or []
+
         references = result.get("references") or []
         task.references = references
         has_context = bool(result.get("has_context"))
@@ -152,8 +187,11 @@ def _run_query(task: StreamTask) -> None:
             items = [ReferenceOut(**item).model_dump(by_alias=True) for item in references]
             _emit(task, "references", {"items": items})
 
+        # 知识缺口判定（决策 D2）：确实检索过 + 没有任何有权上下文 + 不是权限拒绝
+        is_gap = not has_context and not denied
+
         # 权限受限：存在相关知识但均无权访问 —— 不调用大模型，直接给出安全提示
-        if not has_context and result.get("permission_denied"):
+        if not has_context and denied:
             _emit(task, "notice", {"type": "permission_denied", "message": PERMISSION_DENIED_NOTICE})
             _finalize(task, PERMISSION_DENIED_NOTICE)
             return
@@ -167,7 +205,7 @@ def _run_query(task: StreamTask) -> None:
         # 流式生成
         _emit(task, "stage", {"stage": "generating", "label": "生成回答"})
         pieces: list[str] = []
-        for token in llm_client.chat_stream(result.get("messages") or []):
+        for token in llm_client.chat_stream(result.get("messages") or [], usage_out=usage):
             pieces.append(token)
             _emit(task, "delta", {"text": token})
 
@@ -184,6 +222,45 @@ def _run_query(task: StreamTask) -> None:
         logger.exception("问答异常 task=%s", task.task_id)
         _emit(task, "error", {"code": Code.INTERNAL_ERROR, "message": f"服务异常：{exc}"})
         task.finished = True
+    finally:
+        _record_access(
+            task,
+            recalled=recalled,
+            authorized=authorized,
+            usage=usage,
+            is_gap=is_gap,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+
+def _record_access(
+    task: StreamTask,
+    *,
+    recalled: list[str],
+    authorized: list[str],
+    usage: dict[str, Any],
+    is_gap: bool,
+    latency_ms: int,
+) -> None:
+    """落库问答流水并触发沉淀累计（T-27 / T-30 / T-32）。"""
+    try:
+        with SessionLocal() as db:
+            user = db.get(User, task.user_id) if task.user_id else None
+            ops_service.record_access(
+                db,
+                user=user,
+                session_id=task.session_id,
+                question=task.question,
+                hit=bool(authorized),
+                faq_hit=False,
+                is_gap=is_gap,
+                recalled_doc_ids=recalled,
+                authorized_doc_ids=authorized,
+                usage=usage,
+                latency_ms=latency_ms,
+            )
+    except Exception as exc:  # noqa: BLE001 - 埋点失败不影响已生成的回答
+        logger.warning("问答流水落库失败：%s", exc)
 
 
 def _finalize(task: StreamTask, answer: str) -> None:

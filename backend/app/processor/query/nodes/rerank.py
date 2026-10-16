@@ -58,6 +58,20 @@ def rerank_node(state: QueryState) -> QueryState:
         logger.warning("精排失败，降级为融合顺序：%s", exc.message)
         ranked = list(chunks)
 
-    cut = _cliff_cutoff(ranked)
+    # 相关性下限过滤：低于门槛的切片不算「有效上下文」。
+    # 这既是知识缺口识别的前提（否则向量检索总有 Top-K 返回，缺口永不触发），
+    # 也让进入 Prompt 的内容更干净。重排失败降级时分数为 None，此时保守放行。
+    relevant = [
+        item
+        for item in ranked
+        if item.get("rerank_score") is None or item["rerank_score"] >= settings.RAG_MIN_RELEVANCE
+    ]
+    if len(relevant) != len(ranked):
+        logger.info(
+            "相关性过滤：%d 条候选 → %d 条达标（阈值 %.2f）",
+            len(ranked), len(relevant), settings.RAG_MIN_RELEVANCE,
+        )
+
+    cut = _cliff_cutoff(relevant)
     logger.info("精排完成：%d 条候选 → 截断保留 %d 条", len(ranked), len(cut))
     return {"ranked_docs": cut}

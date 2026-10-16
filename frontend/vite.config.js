@@ -14,8 +14,16 @@ export default defineConfig({
     },
   },
   server: {
-    host: '0.0.0.0',
-    port: 5173,
+    // 只绑 IPv4 回环。同一工作区的 sentiment_analyse 项目把 dev server 绑在
+    // IPv6 侧并占着 5173/5174/5175，而 Windows 解析 localhost 时优先走 ::1，
+    // 因此用 http://localhost:<port> 会打到那个项目上。绑 127.0.0.1 后
+    // Vite 只提示 http://127.0.0.1:5175/，照提示打开即本项目。
+    // 需要局域网（手机）联调时临时加 --host：npm run dev -- --host
+    host: '127.0.0.1',
+    port: 5175,
+    // 端口被占用时直接报错退出，不静默漂移到 5176、5177……
+    // 否则 README 写的地址会与实际不符
+    strictPort: true,
     proxy: {
       '/api': { target: BACKEND_TARGET, changeOrigin: true },
       '/internal': { target: BACKEND_TARGET, changeOrigin: true },

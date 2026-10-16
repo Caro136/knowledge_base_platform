@@ -88,10 +88,14 @@ def chat_stream(
     *,
     max_tokens: int = 2048,
     temperature: float = 0.3,
+    usage_out: dict | None = None,
 ):
     """流式调用 LLM，逐块产出正文增量（SSE 用）。
 
     与 :func:`chat` 共用配置；上层负责把增量推送给前端并组装完整答案。
+
+    :param usage_out: 传入字典时，会把服务端返回的 token 用量写入其中
+        （``stream_options.include_usage`` 让流式响应附带用量），供看板统计。
     """
     if not settings.LLM_API_KEY or not settings.LLM_BASE_URL:
         raise BizError(Code.LLM_UNAVAILABLE, "未配置 LLM 服务（LLM_BASE_URL / LLM_API_KEY）")
@@ -105,6 +109,7 @@ def chat_stream(
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "stream": True,
+                "stream_options": {"include_usage": True},
             }
         ).encode("utf-8"),
         method="POST",
@@ -125,6 +130,9 @@ def chat_stream(
                     chunk = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
+                # 用量信息出现在最后一个独立分片中（choices 为空）
+                if usage_out is not None and chunk.get("usage"):
+                    usage_out.update(chunk["usage"])
                 choices = chunk.get("choices") or []
                 if not choices:
                     continue

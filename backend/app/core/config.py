@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     APP_PORT: int = 8080
     API_PREFIX: str = "/api"
     LOG_LEVEL: str = "INFO"
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    CORS_ORIGINS: str = "http://localhost:5175,http://127.0.0.1:5175"
     STATIC_DIR: str = "../frontend/dist"
 
     # ---------- MySQL ----------
@@ -118,6 +118,10 @@ class Settings(BaseSettings):
     RERANK_GAP_ABS: float = 0.5
     RERANK_GAP_RATIO: float = 0.25
     MAX_CONTEXT_CHARS: int = 12000
+    #: 有效上下文的最低重排相关性（0~1）。低于此值的切片视为「未命中有效内容」：
+    #: 既用于剔除明显无关的上下文，也是知识缺口判定（决策 D2 的「无任何有权上下文」）的依据。
+    #: 没有这个下限时，向量检索总会有 Top-K 返回，缺口将永远无法识别。
+    RAG_MIN_RELEVANCE: float = 0.15
 
     # ---------- 切片参数 ----------
     CHUNK_MAX_LENGTH: int = 500

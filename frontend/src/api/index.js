@@ -126,9 +126,32 @@ export const chatDeleteSession = (sessionId) => request.delete(`/chat/history/${
 
 // ---------------------------------------------------------------------------
 // 知识沉淀（T-30 ~ T-34）
-// export const faqList = (params) => request.get('/precipitation/faq/list', { params })
-// export const gapList = (params) => request.get('/precipitation/gap/list', { params })
 // ---------------------------------------------------------------------------
+
+/** 候选与已发布 FAQ：{ keyword, status, page, size } */
+export const faqList = (params) => request.get('/precipitation/faq/list', { params })
+
+/** 已发布 FAQ（对话工作台展示常见问题） */
+export const faqPublished = () => request.get('/precipitation/faq/published')
+
+/** 审核：{ action: 'publish' | 'reject', answer } */
+export const faqAudit = (faqId, data) => request.put(`/precipitation/faq/${faqId}/audit`, data)
+
+export const faqDelete = (faqId) => request.delete(`/precipitation/faq/${faqId}`)
+
+export const faqPerms = (faqId) => request.get(`/precipitation/faq/${faqId}/perms`)
+
+export const assignFaqPerms = (data) => request.post('/precipitation/faq/perms/assign', data)
+
+/** 知识缺口清单：{ includeResolved, page, size } */
+export const gapList = (params) => request.get('/precipitation/gap/list', { params })
+
+export const gapResolve = (gapId) => request.put(`/precipitation/gap/${gapId}/resolve`)
+
+/** 缺口转建补充任务：{ title, ownerId } */
+export const gapCreateTask = (gapId, data) => request.post(`/precipitation/gap/${gapId}/task`, data)
+
+export const gapTasks = (params) => request.get('/precipitation/gap/tasks', { params })
 
 // ---------------------------------------------------------------------------
 // 运营看板（T-27 ~ T-29）

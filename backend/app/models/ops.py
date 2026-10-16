@@ -15,6 +15,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin
 
 # ---------- FAQ 状态 ----------
+FAQ_STATUS_COLLECTING = "collecting"
+"""收集中：频次尚未达到推荐阈值，不出现在审核列表。"""
 FAQ_STATUS_PENDING = "pending"
 FAQ_STATUS_PUBLISHED = "published"
 FAQ_STATUS_REJECTED = "rejected"
