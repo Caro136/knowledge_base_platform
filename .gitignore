@@ -1,0 +1,40 @@
+# ---------- 依赖与虚拟环境 ----------
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# ---------- 构建产物 ----------
+frontend/dist/
+dist/
+build/
+*.egg-info/
+
+# ---------- 环境变量与密钥（安全红线：禁止入库） ----------
+backend/.env
+backend/.env.example
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+
+# ---------- Docker 数据卷 ----------
+docker/volumes/
+
+# ---------- 运行时数据 ----------
+*.log
+logs/
+data/
+uploads/
+tmp/
+
+# ---------- 编辑器与系统 ----------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

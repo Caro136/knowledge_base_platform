@@ -1,0 +1,21 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "知识库管理平台后端服务（T-01/T-02 骨架）"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.4",
+    "sqlalchemy>=2.0.30",
+    "pymysql>=1.1",
+    "cryptography>=42.0",
+    # 密码哈希：passlib 1.7.4 与 bcrypt>=4.1 存在告警，锁定 4.0.1
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt==4.0.1",
+    "python-jose[cryptography]>=3.3",
+]
+
+# 说明：本项目以"应用"形式运行（python -m app.main），无需打包安装，
+# 因此不声明 build-system，uv 会将其视为 virtual project（只装依赖，不装自身）。
+# 包索引配置见同目录 uv.toml（使用国内镜像）。

@@ -1,0 +1,67 @@
+/* 全局基础样式 */
+
+:root {
+  --kb-header-height: 56px;
+  --kb-sidebar-width: 220px;
+  --kb-sidebar-collapsed-width: 64px;
+  --kb-page-bg: #f5f7fa;
+  --kb-border: #e4e7ed;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  color: #303133;
+  background-color: var(--kb-page-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 页面通用容器：业务页面外层统一留白 */
+.kb-page {
+  padding: 16px;
+}
+
+/* 工具栏：页面顶部的筛选/操作区 */
+.kb-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.kb-toolbar .spacer {
+  flex: 1;
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c8c9cc;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8abb2;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

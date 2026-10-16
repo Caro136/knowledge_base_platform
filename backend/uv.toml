@@ -1,0 +1,7 @@
+# uv 包索引配置（中国大陆镜像优先）
+# 如需切回官方源，删除本文件或执行：uv sync --index-url https://pypi.org/simple
+
+[[index]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
