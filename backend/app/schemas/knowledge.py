@@ -43,6 +43,37 @@ class DocOut(CamelModel):
     perm_summary: DocPermSummary = Field(default_factory=DocPermSummary)
 
 
+class DocPermDetail(CamelModel):
+    """知识单元的数据权限详情（对应四维权限配置弹窗）。"""
+
+    doc_id: str
+    is_global: bool = False
+    dept_ids: list[int] = Field(default_factory=list)
+    role_ids: list[int] = Field(default_factory=list)
+    user_ids: list[int] = Field(default_factory=list)
+
+
+class AssignPermsIn(InModel):
+    """覆盖式分配四维数据权限（支持批量赋权，FR-18）。
+
+    ``is_global`` 为真时忽略其余维度；四类维度之间是 OR 关系。
+    全部维度传空即清空权限，该知识单元回到「默认拒绝」状态。
+    """
+
+    doc_ids: list[str] = Field(min_length=1, description="待配置的知识单元锚点列表")
+    is_global: bool = False
+    dept_ids: list[int] = Field(default_factory=list)
+    role_ids: list[int] = Field(default_factory=list)
+    user_ids: list[int] = Field(default_factory=list)
+
+
+class AssignPermsOut(CamelModel):
+    """权限分配结果。"""
+
+    affected: int = Field(description="受影响的知识单元数量")
+    perm: DocPermSummary = Field(description="本次写入的权限摘要")
+
+
 class DocQuery(InModel):
     """台账查询条件。"""
 

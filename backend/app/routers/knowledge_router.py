@@ -16,7 +16,7 @@ from app.core.response import ok
 from app.db.session import get_db
 from app.deps import require_any_permission, require_permission
 from app.models import User
-from app.schemas.knowledge import DocQuery, DocUpdateIn
+from app.schemas.knowledge import AssignPermsIn, DocQuery, DocUpdateIn
 from app.services.knowledge_service import KnowledgeService
 
 router = APIRouter(prefix="/knowledge", tags=["知识管理"])
@@ -72,6 +72,24 @@ def list_docs(
         size=size,
     )
     return ok(KnowledgeService.list_page(db, query))
+
+
+@router.get("/{doc_id}/perms", summary="查询知识单元的数据权限")
+def get_doc_perms(
+    doc_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("knowledge:perm")),
+) -> dict:
+    return ok(KnowledgeService.get_perms(db, doc_id))
+
+
+@router.post("/perms/assign", summary="分配四维数据权限（覆盖式，支持批量）")
+def assign_doc_perms(
+    payload: AssignPermsIn,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("knowledge:perm")),
+) -> dict:
+    return ok(KnowledgeService.assign_perms(db, payload))
 
 
 @router.get("/{doc_id}", summary="知识单元详情")

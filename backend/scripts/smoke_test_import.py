@@ -92,6 +92,27 @@ def _build_sample_docx() -> bytes:
     return buffer.getvalue()
 
 
+def _build_sample_png(size: int = 64) -> bytes:
+    """用标准库生成一张纯色 PNG，用于验证图片知识的语义化链路（决策 D1）。"""
+    import struct
+    import zlib
+
+    width = height = size
+    raw = b"".join(b"\x00" + bytes((210, 60, 60)) * width for _ in range(height))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
 def _wait_done(task_id: str, token: str, timeout: int) -> tuple[dict, list[str]]:
     """轮询任务直到终态，返回 (最终任务状态, 阶段轨迹)。"""
     deadline = time.time() + timeout
@@ -117,7 +138,7 @@ def main() -> int:
     # 默认使用内置 Markdown 文档（走本地直读路径，不依赖解析服务）；
     # --file <路径>   上传任意受支持格式，验证解析服务链路；
     # --sample-docx   现场生成一个最小 .docx 验证解析链路，无需外部素材。
-    external = "--file" in sys.argv or "--sample-docx" in sys.argv
+    external = "--file" in sys.argv or "--sample-docx" in sys.argv or "--sample-image" in sys.argv
     if "--file" in sys.argv:
         from pathlib import Path
 
@@ -130,6 +151,9 @@ def main() -> int:
     elif "--sample-docx" in sys.argv:
         upload_item = ("travel-standard.docx", _build_sample_docx())
         print("    使用现场生成的 .docx 样本（验证解析服务链路）")
+    elif "--sample-image" in sys.argv:
+        upload_item = ("sample-image.png", _build_sample_png())
+        print("    使用现场生成的 PNG 样本（验证图片语义化链路）")
     else:
         upload_item = ("travel-standard.md", DOCUMENT)
 
@@ -185,7 +209,15 @@ def main() -> int:
         check("向量：切片携带权限锚点 doc_id", all(row.get("doc_id") == doc_id for row in rows), len(rows))
 
         contents = "\n".join(str(row.get("content") or "") for row in rows)
-        check("切片：正文内容已入库并可检索", "差旅报销标准" in contents, contents[:50].replace("\n", " / "))
+        if "--sample-image" in sys.argv:
+            # 图片知识必须经视觉模型转成文本后才能真正可检索（决策 D1）
+            check(
+                "图片：切片包含视觉模型生成的语义描述",
+                "【图片内容】" in contents and len(contents) > 30,
+                contents[:70].replace("\n", " / "),
+            )
+        else:
+            check("切片：正文内容已入库并可检索", "差旅报销标准" in contents, contents[:50].replace("\n", " / "))
         if not external:
             # 表格线性化只在内置 Markdown 样本中验证（外部样本不含表格）
             check(

@@ -77,17 +77,52 @@ export const roleAssignMenus = (id, data) => request.put(`/role/${id}/menus`, da
 
 // ---------------------------------------------------------------------------
 // 知识管理（T-10 ~ T-17）
-// export const knowledgeList = (params) => request.get('/knowledge/list', { params })
-// export const supportedFormats = () => request.get('/knowledge/supported-formats')
-// export const importStatus = (taskId) => request.get(`/knowledge/status/${taskId}`)
-// export const assignDocPerms = (data) => request.post('/knowledge/perms/assign', data)
 // ---------------------------------------------------------------------------
+
+/** 知识单元台账：{ keyword, sourceType, category, status, enabled, page, size } */
+export const knowledgeList = (params) => request.get('/knowledge/list', { params })
+
+export const knowledgeDetail = (docId) => request.get(`/knowledge/${docId}`)
+
+export const knowledgeUpdate = (docId, data) => request.put(`/knowledge/${docId}`, data)
+
+export const knowledgeDelete = (docId) => request.delete(`/knowledge/${docId}`)
+
+/** 支持的 7 类文档格式与扩展名 */
+export const supportedFormats = () => request.get('/knowledge/supported-formats')
+
+/** 导入任务进度（前端轮询） */
+export const importStatus = (taskId) => request.get(`/knowledge/status/${taskId}`)
+
+/** 批量上传：FormData（字段名 files） */
+export const uploadDocs = (formData, onUploadProgress) =>
+  request.post('/knowledge/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress,
+    timeout: 300000,
+  })
+
+/** 查询知识单元的四维数据权限 */
+export const docPerms = (docId) => request.get(`/knowledge/${docId}/perms`)
+
+/** 覆盖式分配四维数据权限：{ docIds, isGlobal, deptIds, roleIds, userIds } */
+export const assignDocPerms = (data) => request.post('/knowledge/perms/assign', data)
+
+/** 知识单元图片资源地址（供 <img> 直接引用） */
+export const docAssetUrl = (docId, name) => `/api/knowledge/${docId}/assets/${encodeURIComponent(name)}`
 
 // ---------------------------------------------------------------------------
 // AI 问答（T-19 ~ T-26）
-// export const chatQuery = (data) => request.post('/chat/query', data)
-// export const chatSessions = () => request.get('/chat/sessions')
 // ---------------------------------------------------------------------------
+
+/** 发起问答 → { taskId, sessionId }；正文经 SSE 推送（见 utils/sse.js） */
+export const chatQuery = (data) => request.post('/chat/query', data)
+
+export const chatSessions = () => request.get('/chat/sessions')
+
+export const chatHistory = (sessionId) => request.get(`/chat/history/${sessionId}`)
+
+export const chatDeleteSession = (sessionId) => request.delete(`/chat/history/${sessionId}`)
 
 // ---------------------------------------------------------------------------
 // 知识沉淀（T-30 ~ T-34）

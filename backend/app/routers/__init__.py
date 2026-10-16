@@ -22,12 +22,12 @@ def register_routers(app: FastAPI) -> None:
         - /api/knowledge/*                      知识台账与导入任务（T-10 / T-11）
 
     待注册（按任务分解推进）：
-        - /api/knowledge/perms/*                数据权限配置（T-16 / T-17）
-        - /api/chat, /internal/authz            T-19 ~ T-26
         - /api/dashboard                        T-27 ~ T-29
         - /api/precipitation                    T-30 ~ T-34
     """
     from app.routers.auth_router import router as auth_router
+    from app.routers.authz_router import router as authz_router
+    from app.routers.chat_router import router as chat_router
     from app.routers.dept_router import router as dept_router
     from app.routers.health import router as health_router
     from app.routers.knowledge_router import router as knowledge_router
@@ -35,8 +35,9 @@ def register_routers(app: FastAPI) -> None:
     from app.routers.role_router import router as role_router
     from app.routers.user_router import router as user_router
 
-    # 健康检查不带业务前缀
+    # 健康检查与内部鉴权接口不带业务前缀（内部接口路径自带 /internal）
     app.include_router(health_router)
+    app.include_router(authz_router)
 
     api_routers = (
         auth_router,
@@ -45,6 +46,7 @@ def register_routers(app: FastAPI) -> None:
         role_router,
         dept_router,
         knowledge_router,
+        chat_router,
     )
     for router in api_routers:
         app.include_router(router, prefix=settings.API_PREFIX)

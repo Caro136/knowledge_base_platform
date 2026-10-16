@@ -104,9 +104,11 @@ uv run python -m app.main   # 启动，默认 http://127.0.0.1:8080
 ```bash
 curl http://127.0.0.1:8080/healthz          # 存活探针
 curl http://127.0.0.1:8080/healthz/ready    # 就绪探针（检查 MySQL）
-uv run python -m scripts.smoke_test_api         # 认证与组织权限冒烟测试（31 项）
-uv run python -m scripts.smoke_test_knowledge   # 知识台账与上传冒烟测试（28 项）
-uv run python -m scripts.smoke_test_import      # 导入流程冒烟测试（直读路径 14 项）
+uv run python -m scripts.smoke_test_api         # 认证与组织权限（31 项）
+uv run python -m scripts.smoke_test_knowledge   # 知识台账与上传（28 项）
+uv run python -m scripts.smoke_test_authz       # 数据权限鉴权（23 项）
+uv run python -m scripts.smoke_test_chat        # AI 鉴权问答（22 项）
+uv run python -m scripts.smoke_test_import      # 导入流程·直读路径（14 项）
 ```
 
 接口文档：http://127.0.0.1:8080/docs
@@ -145,7 +147,13 @@ cd frontend && npm run build
 | T-11 | 上传与任务登记：批量上传、格式白名单、对象存储落地、doc_id 与任务表 | ✅ |
 | T-12 | 导入 DAG：格式路由、MinerU 云解析、图片语义化、表格线性化、按标题切片 | ✅ |
 | T-13 | 向量化与入库：BGE-M3 稠密+稀疏向量、Milvus 写入、`doc_id` 锚点、幂等重建 | ✅ |
-| T-14 ~ T-37 | 鉴权引擎、问答、看板、知识沉淀、端到端交付 | ⏳ |
+| T-16 | 动态数据权限鉴权引擎：四维 OR 判定、批量过滤、fail-closed 降级、鉴权解释 | ✅ |
+| T-17 | 四维数据权限配置：权限查询与覆盖式分配（支持批量赋权） | ✅ |
+| T-19 ~ T-24 | 问答链路：混合检索(RRF)、鉴权过滤、精排截断、流式生成、引用溯源、会话存储 | ✅ |
+| T-14/T-15 | 前端知识管理页：台账、拖拽导入与进度、编辑删除、批量赋权入口 | ✅ |
+| T-18 | 权限实体选择器组件（知识单元与 FAQ 共用） | ✅ |
+| T-26 | 前端问答工作台：SSE 流式渲染、引用溯源、受限提示、多会话 | ✅ |
+| T-25、T-27 ~ T-37 | FAQ 缓存、运营看板、知识沉淀、端到端交付 | ⏳ |
 
 > - **T-05~T-08**：31 项冒烟测试通过（`scripts/smoke_test_api.py`）——登录、越权拦截（20002）、
 >   权限点与菜单裁剪、组织 CRUD、角色授权读写、参数校验与测试数据清理。
@@ -157,7 +165,33 @@ cd frontend && npm run build
 >   （`scripts/smoke_test_import.py`）——导入任务阶段推进、表格线性化、
 >   稠密（1024 维）与稀疏向量入库、`doc_id` 权限锚点、知识单元状态回填、
 >   删除时向量级联清理。解析路径由 MinerU 云 API 实测完成。
-> - **待验证**：图片类知识的语义化（受视觉模型配置阻塞，见下方待确认第 1 条）。
+> - **T-16/T-17**：23 项冒烟测试通过（`scripts/smoke_test_authz.py`）——复现 PRD §2.9.9 的
+>   跨部门知识隔离场景：四维 OR 判定、未配置权限默认拒绝、超管全放行、
+>   覆盖式赋权**即时生效**、鉴权解释可说明「为什么看不到」、悬空实体与越权操作均被拦截。
+> - **图片链路**：13 项冒烟测试通过（`scripts/smoke_test_import.py --sample-image`）——
+>   图片经视觉模型生成中文描述后入库，图片知识可被文本检索命中（决策 D1 闭环）。
+> - **T-19~T-24**：22 项冒烟测试通过（`scripts/smoke_test_chat.py`）——混合检索与 RRF 融合、
+>   鉴权过滤（置于重排之前）、精排与断崖截断、SSE 流式生成（实测 88 个正文增量）、
+>   引用溯源、多轮会话、会话隔离；**越权防护**三连验证：回答不含受限数值、
+>   引用不含受限文档、无任何有权内容时返回权限受限提示且**不调用大模型**。
+> - **前端（T-14/T-15/T-18/T-26）**：构建通过，三个页面已接入真实接口。
+>   前端无自动化测试，**交互需按下节清单人工验证**。
+
+### 前端手动验证清单
+
+```bash
+# 终端 A
+cd backend && uv run python -m app.main
+# 终端 B
+cd frontend && npm run dev        # 打开 http://127.0.0.1:5173
+```
+
+1. 用 `admin` 登录 → 侧边栏出现全部菜单；
+2. **知识管理** → 「导入文档」抽屉 → 拖入一个 Markdown/PDF → 观察进度条逐阶段推进至「处理完成」；
+3. 选中该知识单元 → 「数据权限」→ 勾选部门/角色/个人 → 保存 → 台账的权限标签应即时更新；
+4. 用另一个账号登录 → 侧边栏与按钮应只保留被授权的项；
+5. **智能问答** → 就知识库内的内容提问 → 应看到流式输出与「引用来源」列表（悬浮可看切片摘录）；
+6. 向无权限的账号提问受限话题 → 应出现黄色权限受限提示，且不产生正文。
 
 ### 模型服务验证
 
@@ -194,6 +228,10 @@ uv run python -m scripts.smoke_test_import --file <文件路径>
 | GET | `/api/knowledge/list` | `knowledge:list` 等 | 知识单元台账（分页、多条件筛选、含权限摘要） |
 | GET/PUT/DELETE | `/api/knowledge/{doc_id}` | `knowledge:query/update/delete` | 详情 / 编辑（PATCH 语义）/ 删除（级联清理） |
 | GET | `/api/knowledge/{doc_id}/assets/{name}` | `knowledge:*` | 知识单元图片资源（答案配图，返回图片流） |
+| POST | `/api/chat/query` | `ai:chat` | 发起问答，返回 task_id（生成过程经 SSE 推送） |
+| GET | `/api/chat/stream/{task_id}` | `ai:chat` | SSE 流：stage / delta / references / notice / done |
+| GET | `/api/chat/sessions` | `ai:chat` | 当前用户的会话列表 |
+| GET/DELETE | `/api/chat/history/{session_id}` | `ai:chat` | 会话消息历史 / 删除会话 |
 | GET | `/healthz`、`/healthz/ready` | 公开 | 健康检查 |
 
 ## 关键约定
@@ -209,14 +247,10 @@ uv run python -m scripts.smoke_test_import --file <文件路径>
 
 PRD §11 与 SPEC §11 列出了仍需业务方确认的事项，其中亟待处理的：
 
-1. **视觉模型配置疑似有误**：`.env` 中 `VLM_MODEL=qwen-image-3.0-pro`，实测该模型拒绝图片输入
-   （DashScope 返回 `invalid_parameter_error`）。`qwen-image` 系列是**文生图**模型，
-   图片理解应使用视觉理解模型（如 `qwen-vl-max` / `qwen3-vl-flash`）；
-   且当前 `VLM_API_KEY` 格式（`sk-ws-...`）与标准 DashScope Key 不同，
-   用 `qwen-vl-plus` / `qwen3-vl-flash` 测试均返回 `Model not exist`。
-   在修正前，**图片类知识无法语义化**（T-12 该环节会记录警告，普通文档仅损失配图信息）。
-2. 嵌入与重排当前运行在 **CPU**（`.env` 的 `BGE_DEVICE=cpu`）：导入时向量化耗时明显高于 GPU。
-   宿主机为 RTX 3050 Ti（4GB），如需切到 GPU 请改为 `cuda:0` 并评估显存。
+1. ~~视觉模型配置~~ **已解决**：`VLM_MODEL` 已切换为专属实例上的 `qwen3-vl-plus`，
+   图片语义化链路实测通过（见 T-12/T-13 验证）。
+2. 嵌入与重排运行在 **CPU**（已确认）：宿主机 PyTorch 为 CPU 构建。
+   如需启用 GPU 加速，先安装 CUDA 版 PyTorch，再把 `BGE_DEVICE` 改为 `cuda:0`、`BGE_FP16=1`。
 3. 非功能指标（并发、知识库规模、响应时长目标）。
 4. 「切片调整」的交互粒度（是否需要切片级编辑并写回向量库）。
 

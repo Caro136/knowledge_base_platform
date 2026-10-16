@@ -22,6 +22,8 @@ dependencies = [
     # T-13：向量库客户端 + BGE-M3 稠密/稀疏嵌入（会带入 torch / transformers）
     "pymilvus>=2.4",
     "FlagEmbedding>=1.2",
+    # T-24：会话历史存储
+    "pymongo>=4.7",
 ]
 
 # 说明：本项目以"应用"形式运行（python -m app.main），无需打包安装，

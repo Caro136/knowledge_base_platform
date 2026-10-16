@@ -197,6 +197,62 @@ def delete_by_doc_id(doc_id: str) -> None:
         raise BizError(Code.VECTOR_DB_UNAVAILABLE, f"向量清理失败：{exc}") from exc
 
 
+def search_chunks(
+    dense_vector: list[float],
+    sparse_vector: dict[int, float] | None,
+    limit: int = 5,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """混合检索：稠密与稀疏两路各自召回，返回 (稠密结果, 稀疏结果)。
+
+    两路结果不在此融合——融合（RRF）属于查询流程的业务逻辑，
+    放在节点里更容易替换与测试。
+    """
+    collection = ensure_collection()
+    client = get_client()
+    output_fields = ["chunk_id", "content", "title", "parent_title", "file_title", "doc_id"]
+
+    try:
+        dense_hits = client.search(
+            collection_name=collection,
+            data=[dense_vector],
+            anns_field="dense_vector",
+            limit=limit,
+            output_fields=output_fields,
+            search_params={"metric_type": "COSINE"},
+        )[0]
+        sparse_hits = []
+        if sparse_vector:
+            sparse_hits = client.search(
+                collection_name=collection,
+                data=[sparse_vector],
+                anns_field="sparse_vector",
+                limit=limit,
+                output_fields=output_fields,
+                search_params={"metric_type": "IP"},
+            )[0]
+    except Exception as exc:  # noqa: BLE001
+        logger.error("向量检索失败：%s", exc)
+        raise BizError(Code.VECTOR_DB_UNAVAILABLE, f"向量检索失败：{exc}") from exc
+
+    return [_normalize_hit(hit) for hit in dense_hits], [_normalize_hit(hit) for hit in sparse_hits]
+
+
+def _normalize_hit(hit: dict[str, Any]) -> dict[str, Any]:
+    """把 Milvus 的检索结果整理成流程内部使用的扁平结构。"""
+    entity = hit.get("entity") or {}
+    return {
+        # MilvusClient 以「主键字段名」作为返回键（本项目主键为 chunk_id），
+        # 部分版本返回通用的 "id"，两种都兼容
+        "chunk_id": hit.get("chunk_id", hit.get("id")),
+        "score": hit.get("distance"),
+        "content": entity.get("content") or "",
+        "title": entity.get("title") or "",
+        "parent_title": entity.get("parent_title") or "",
+        "file_title": entity.get("file_title") or "",
+        "doc_id": entity.get("doc_id") or "",
+    }
+
+
 def count_by_doc_id(doc_id: str) -> int:
     """统计某知识单元的切片数量（供任务收尾校验）。"""
     try:

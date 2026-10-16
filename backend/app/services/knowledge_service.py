@@ -15,7 +15,7 @@ from pathlib import Path
 
 from fastapi import UploadFile
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.codes import Code
@@ -36,13 +36,18 @@ from app.models import (
     SOURCE_PPT,
     SOURCE_TXT,
     SOURCE_WORD,
+    Dept,
     KbDocPerm,
     KbDocument,
     KbImportTask,
+    Role,
     User,
 )
 from app.schemas.knowledge import (
+    AssignPermsIn,
+    AssignPermsOut,
     DocOut,
+    DocPermDetail,
     DocPermSummary,
     DocQuery,
     DocUpdateIn,
@@ -247,6 +252,106 @@ class KnowledgeService:
 
         _purge_vectors(doc_id)
         logger.info("知识单元已删除 doc_id=%s", doc_id)
+
+    # ---------------- 数据权限（T-17） ----------------
+
+    @staticmethod
+    def get_perms(db: Session, doc_id: str) -> DocPermDetail:
+        """查询单个知识单元的四维权限配置。"""
+        _get_doc(db, doc_id)  # 顺带校验知识单元存在
+
+        detail = DocPermDetail(doc_id=doc_id)
+        rows = db.scalars(select(KbDocPerm).where(KbDocPerm.doc_id == doc_id)).all()
+        for row in rows:
+            if row.perm_type == PERM_GLOBAL:
+                detail.is_global = True
+            elif row.perm_type == PERM_DEPARTMENT:
+                detail.dept_ids.append(row.entity_id)
+            elif row.perm_type == PERM_ROLE:
+                detail.role_ids.append(row.entity_id)
+            elif row.perm_type == PERM_USER:
+                detail.user_ids.append(row.entity_id)
+
+        detail.dept_ids.sort()
+        detail.role_ids.sort()
+        detail.user_ids.sort()
+        return detail
+
+    @staticmethod
+    def assign_perms(db: Session, payload: AssignPermsIn) -> AssignPermsOut:
+        """覆盖式分配四维数据权限（支持一次配置多个知识单元，FR-17/FR-18）。
+
+        覆盖式语义：每次提交都**完整替换**目标知识单元的权限配置，
+        因此传空即清空权限（回到「默认拒绝」），前端弹窗无需做增量 diff。
+
+        权限即时生效：鉴权引擎（T-16）实时查库判定，本条无需同步任何缓存。
+        """
+        unique_ids = list(dict.fromkeys(payload.doc_ids))
+        docs = list(db.scalars(select(KbDocument).where(KbDocument.doc_id.in_(unique_ids))))
+        if len(docs) != len(unique_ids):
+            missing = sorted(set(unique_ids) - {doc.doc_id for doc in docs})
+            raise BizError(Code.DOCUMENT_NOT_FOUND, f"知识单元不存在：{', '.join(missing)}")
+
+        dept_ids = sorted(set(payload.dept_ids))
+        role_ids = sorted(set(payload.role_ids))
+        user_ids = sorted(set(payload.user_ids))
+        if not payload.is_global:
+            KnowledgeService._validate_perm_entities(db, dept_ids, role_ids, user_ids)
+
+        doc_ids = [doc.doc_id for doc in docs]
+        db.execute(delete(KbDocPerm).where(KbDocPerm.doc_id.in_(doc_ids)))
+
+        records: list[KbDocPerm] = []
+        for doc in docs:
+            if payload.is_global:
+                records.append(
+                    KbDocPerm(doc_id=doc.doc_id, document_pk=doc.id, perm_type=PERM_GLOBAL, entity_id=0)
+                )
+                continue
+            records.extend(
+                KbDocPerm(doc_id=doc.doc_id, document_pk=doc.id, perm_type=kind, entity_id=entity_id)
+                for kind, entity_ids in (
+                    (PERM_DEPARTMENT, dept_ids),
+                    (PERM_ROLE, role_ids),
+                    (PERM_USER, user_ids),
+                )
+                for entity_id in entity_ids
+            )
+
+        db.add_all(records)
+        db.commit()
+
+        logger.info(
+            "数据权限已更新：%d 个知识单元（global=%s dept=%d role=%d user=%d）",
+            len(docs), payload.is_global, len(dept_ids), len(role_ids), len(user_ids),
+        )
+        return AssignPermsOut(
+            affected=len(docs),
+            perm=DocPermSummary(
+                is_global=payload.is_global,
+                dept_ids=[] if payload.is_global else dept_ids,
+                role_ids=[] if payload.is_global else role_ids,
+                user_ids=[] if payload.is_global else user_ids,
+            ),
+        )
+
+    @staticmethod
+    def _validate_perm_entities(
+        db: Session, dept_ids: list[int], role_ids: list[int], user_ids: list[int]
+    ) -> None:
+        """校验授权实体确实存在，避免写入指向已删除实体的悬空授权。"""
+        checks = (
+            ("部门", Dept, dept_ids),
+            ("角色", Role, role_ids),
+            ("用户", User, user_ids),
+        )
+        for label, model, ids in checks:
+            if not ids:
+                continue
+            found = set(db.scalars(select(model.id).where(model.id.in_(ids))).all())
+            if found != set(ids):
+                missing = sorted(set(ids) - found)
+                raise BizError(Code.PARAM_INVALID, f"{label}不存在：{missing}")
 
     # ---------------- 上传（T-11） ----------------
 

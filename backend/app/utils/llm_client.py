@@ -83,6 +83,62 @@ def chat(
     return _extract_content(body)
 
 
+def chat_stream(
+    messages: list[dict],
+    *,
+    max_tokens: int = 2048,
+    temperature: float = 0.3,
+):
+    """流式调用 LLM，逐块产出正文增量（SSE 用）。
+
+    与 :func:`chat` 共用配置；上层负责把增量推送给前端并组装完整答案。
+    """
+    if not settings.LLM_API_KEY or not settings.LLM_BASE_URL:
+        raise BizError(Code.LLM_UNAVAILABLE, "未配置 LLM 服务（LLM_BASE_URL / LLM_API_KEY）")
+
+    request = urllib.request.Request(
+        f"{settings.LLM_BASE_URL.rstrip('/')}/v1/chat/completions",
+        data=json.dumps(
+            {
+                "model": settings.LLM_MODEL,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": True,
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Authorization", f"Bearer {settings.LLM_API_KEY}")
+
+    try:
+        with _OPENER.open(request, timeout=settings.LLM_TIMEOUT_SECONDS) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    yield content
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:200]
+        raise BizError(Code.LLM_UNAVAILABLE, f"模型服务返回 {exc.code}：{detail}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise BizError(Code.LLM_UNAVAILABLE, f"模型流式调用失败：{exc}") from exc
+
+
 def describe_image(image_bytes: bytes, mime_type: str, prompt: str) -> str:
     """调用视觉模型描述图片内容（决策 D1：图片知识必须语义化后才能被检索）。"""
     if not settings.VLM_API_KEY or not settings.VLM_BASE_URL:
