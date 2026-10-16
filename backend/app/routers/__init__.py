@@ -28,6 +28,7 @@ def register_routers(app: FastAPI) -> None:
     from app.routers.auth_router import router as auth_router
     from app.routers.authz_router import router as authz_router
     from app.routers.chat_router import router as chat_router
+    from app.routers.dashboard_router import router as dashboard_router
     from app.routers.dept_router import router as dept_router
     from app.routers.health import router as health_router
     from app.routers.knowledge_router import router as knowledge_router
@@ -49,6 +50,7 @@ def register_routers(app: FastAPI) -> None:
         knowledge_router,
         chat_router,
         precipitation_router,
+        dashboard_router,
     )
     for router in api_routers:
         app.include_router(router, prefix=settings.API_PREFIX)

@@ -154,8 +154,17 @@ export const gapCreateTask = (gapId, data) => request.post(`/precipitation/gap/$
 export const gapTasks = (params) => request.get('/precipitation/gap/tasks', { params })
 
 // ---------------------------------------------------------------------------
-// 运营看板（T-27 ~ T-29）
-// export const dashOverview = (params) => request.get('/dashboard/overview', { params })
+// 运营看板（T-28）
 // ---------------------------------------------------------------------------
+
+/** 总览指标：{ days } → 访问量/人数/知识单元/Token/延时/命中率/缺口数 */
+export const dashOverview = (params) => request.get('/dashboard/overview', { params })
+
+/** 访问趋势（按天 PV / UV）：{ days } */
+export const dashTrend = (params) => request.get('/dashboard/trend', { params })
+
+export const dashTopQuestions = (params) => request.get('/dashboard/top-questions', { params })
+
+export const dashTopDocs = (params) => request.get('/dashboard/top-docs', { params })
 
 export { request }

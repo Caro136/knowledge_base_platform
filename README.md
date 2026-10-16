@@ -109,6 +109,7 @@ uv run python -m scripts.smoke_test_knowledge   # 知识台账与上传（28 项
 uv run python -m scripts.smoke_test_authz       # 数据权限鉴权（23 项）
 uv run python -m scripts.smoke_test_chat        # AI 鉴权问答（22 项）
 uv run python -m scripts.smoke_test_precipitation  # 知识沉淀闭环（22 项）
+uv run python -m scripts.smoke_test_dashboard   # 运营看板聚合（17 项）
 uv run python -m scripts.smoke_test_import      # 导入流程·直读路径（14 项）
 ```
 
@@ -158,7 +159,9 @@ cd frontend && npm run build
 | T-25 / T-30 / T-31 | FAQ 挖掘与快速应答缓存：频次聚合、候选推荐、审核发布、毫秒级命中 | ✅ |
 | T-32 / T-33 | 知识缺口识别（决策 D2 三条件）、清单与转建补充任务 | ✅ |
 | T-34 | 前端沉淀页：FAQ 审核区 + 知识缺口清单 | ✅ |
-| T-28 / T-29、T-35 ~ T-37 | 看板聚合与图表、端到端交付 | ⏳ |
+| T-28 | 看板聚合接口：总览指标、访问趋势、高频提问榜、热门知识榜 | ✅ |
+| T-29 | 前端运营看板：指标卡 + ECharts 趋势/环形图 + 排行榜 | ✅ |
+| T-35 ~ T-37 | 端到端验收、安全加固与交付说明 | ⏳ |
 
 > - **T-05~T-08**：31 项冒烟测试通过（`scripts/smoke_test_api.py`）——登录、越权拦截（20002）、
 >   权限点与菜单裁剪、组织 CRUD、角色授权读写、参数校验与测试数据清理。
@@ -200,7 +203,9 @@ cd frontend && npm run dev        # 打开 http://127.0.0.1:5175
 7. **FAQ 沉淀** → 反复提问同一问题达到阈值（默认 5 次）→ 「FAQ 审核」应出现自动生成的候选 →
    编辑答案并发布 → 再问同一问题应**秒回**且无流式过程；
 8. **知识缺口** → 提一个知识库完全没覆盖的问题 → 「知识缺口」应出现该问题与频次 →
-   「转建补充任务」应生成任务并从待处理清单中移除。
+   「转建补充任务」应生成任务并从待处理清单中移除；
+9. **运营看板** → 提几个问题后回到看板 → 访问次数、Token 消耗、趋势折线、高频提问榜
+   应随刚才的操作增长（数据源是问答流水，非模拟数据）。
 
 ### 模型服务验证
 
@@ -249,6 +254,10 @@ uv run python -m scripts.smoke_test_import --file <文件路径>
 | GET | `/api/precipitation/gap/list` | `gap:list` | 知识缺口清单 |
 | PUT | `/api/precipitation/gap/{id}/resolve` | `gap:handle` | 标记缺口已解决 |
 | POST | `/api/precipitation/gap/{id}/task` | `gap:handle` | 缺口转建知识补充任务 |
+| GET | `/api/dashboard/overview` | `dashboard:view` | 总览：PV/UV、知识单元、Token、延时、命中率、缺口数 |
+| GET | `/api/dashboard/trend` | `dashboard:view` | 访问趋势（按天 PV / UV） |
+| GET | `/api/dashboard/top-questions` | `dashboard:view` | 高频提问排行 |
+| GET | `/api/dashboard/top-docs` | `dashboard:view` | 热门知识单元排行 |
 | GET | `/healthz`、`/healthz/ready` | 公开 | 健康检查 |
 
 ## 关键约定

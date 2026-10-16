@@ -41,6 +41,8 @@ export default defineConfig({
         // 否则会因未被引用而产出空 chunk。
         manualChunks: {
           'element-plus': ['element-plus', '@element-plus/icons-vue'],
+          // 图表库体积较大且仅看板页用到，单独成 chunk 便于缓存
+          echarts: ['echarts'],
         },
       },
     },
