@@ -53,7 +53,16 @@ class Settings(BaseSettings):
     MILVUS_CHUNK_COLLECTION: str = "kb_chunks"
     MILVUS_ITEM_COLLECTION: str = "kb_item_name"
 
-    # ---------- MinIO ----------
+    # ---------- 对象存储 ----------
+    # 默认 local（本地文件系统）：MinIO 官方镜像已从 Docker Hub 下架，单机部署下
+    # 本地目录更简单且无额外中间件；如需 S3 兼容对象存储，把 STORAGE_BACKEND 改为 minio。
+    STORAGE_BACKEND: str = "local"
+    LOCAL_STORAGE_DIR: str = "./data/files"
+
+    # ---------- 上传 ----------
+    MAX_UPLOAD_MB: int = 50
+
+    # ---------- MinIO（可选后端，STORAGE_BACKEND=minio 时生效） ----------
     MINIO_ENDPOINT: str = "127.0.0.1:9000"
     MINIO_ACCESS_KEY: str = "kbminio"
     MINIO_SECRET_KEY: str = "kbminio_pass_2026"

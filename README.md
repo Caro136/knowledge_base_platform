@@ -12,9 +12,31 @@
 |----|------|
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + Vue Router + ECharts |
 | 后端 | Python 3.12 + FastAPI + LangGraph 工作流 |
-| 存储 | MySQL 8.0（平台数据）· Milvus 2.5（向量）· MongoDB 7.0（会话）· MinIO（文件） |
+| 存储 | MySQL 8.0（平台数据）· Milvus（向量）· MongoDB（会话）· MinIO（内网虚拟机，原文件与图片） |
 | 模型 | 云 LLM/VLM + 本地 BGE-M3 与 BGE-reranker（GPU） |
 | 架构 | 单体分层（Modular Monolith），单端口对外并托管前端产物 |
+
+## 依赖服务策略：复用宿主机既有实例
+
+依赖服务默认**不启动容器**，由 `backend/.env` 指向宿主机既有实例：
+
+| 服务 | 默认地址 | 来源 |
+|------|---------|------|
+| MySQL | 127.0.0.1:3306 | 宿主机既有实例 |
+| MongoDB | 127.0.0.1:27017 | 宿主机既有实例 |
+| Milvus | 127.0.0.1:19530 | 宿主机既有实例 |
+| MinIO | 192.168.10.102:9000 | 内网虚拟机实例（无需容器） |
+
+`docker/docker-compose.yml` 中的对应服务已归入 `local-stack` profile，**默认不启动**；
+仅当宿主机缺少某服务、需要一套完整本地环境时才启用（此时使用备用端口 3307 / 27018 / 19531 / 8001，避免与既有服务冲突）：
+
+```bash
+docker compose -f docker/docker-compose.yml --profile local-stack up -d
+```
+
+> 对象存储使用内网虚拟机上的 MinIO 实例（地址与账号见 `backend/.env` 的 `MINIO_*`）。
+> MinIO 官方镜像已从 Docker Hub 下架，故本项目 compose 中不启动该容器。
+> 若需退回本地文件系统，把 `.env` 的 `STORAGE_BACKEND` 改为 `local` 即可。
 
 ## 目录结构
 
@@ -27,9 +49,16 @@ knowledge_base_platform/
 │   │   ├── db/               声明基类、会话管理、建表工具
 │   │   ├── models/           ORM 模型（权限域 / 知识域 / 运营沉淀域）
 │   │   ├── schemas/          Pydantic 请求响应模型
-│   │   ├── routers/          接口层（注册入口 + 健康检查）
+│   │   ├── services/         领域服务（认证 / 组织权限 / 知识管理 / 对象存储）
+│   │   ├── routers/          接口层（认证 / 菜单 / 用户 / 角色 / 部门 / 健康检查）
+│   │   ├── deps.py           依赖注入：当前用户与操作权限校验
 │   │   ├── main.py           应用入口
 │   │   └── seed.py           建表 + 菜单权限点 + 初始管理员
+│   ├── scripts/
+│   │   ├── init_mysql.sql            MySQL 建库脚本（在既有实例上执行一次）
+│   │   ├── smoke_common.py           冒烟测试公共工具
+│   │   ├── smoke_test_api.py         认证与组织权限冒烟测试
+│   │   └── smoke_test_knowledge.py   知识台账与导入任务冒烟测试
 │   ├── uv.toml               包索引（国内镜像）
 │   └── .env.example          环境变量模板
 ├── frontend/                 前端控制台（Vue3）
@@ -43,40 +72,27 @@ knowledge_base_platform/
 │   │   └── views/            业务页面
 │   └── .npmrc                npm 国内镜像
 └── docker/
-    └── docker-compose.yml    依赖服务编排（MySQL/MongoDB/Milvus/MinIO）
+    └── docker-compose.yml    依赖服务编排（默认不启动）
 ```
 
 ## 快速开始
 
-### 1. 启动依赖服务
+### 1. 初始化数据库（在既有 MySQL 上执行一次）
 
 ```bash
-cd docker
-docker compose up -d
-docker compose ps          # 等待 mysql 与 milvus 变为 healthy
+mysql -h127.0.0.1 -P3306 -uroot -p < backend/scripts/init_mysql.sql
 ```
 
-> 拉取镜像缓慢时，请为 Docker Desktop 配置国内镜像加速。
-> 本机已有 MySQL/MongoDB 实例时，可只启动 `milvus` 与 `minio`，并修改 `.env` 连接地址。
-
-#### 端口占用处理
-
-默认端口：`8080` 应用 · `3306` MySQL · `27017` MongoDB · `19530/9091` Milvus · `9000/9001` MinIO · `8000` Attu。
-
-若与既有服务冲突（例如本机已安装 MySQL 占用 3306），二选一：
-
-1. **复用既有服务**：不启动对应容器，仅把 `backend/.env` 中的连接地址指向既有实例；
-2. **改用其他端口**：修改 `docker/docker-compose.yml` 的端口映射，并同步修改 `backend/.env`
-   （例如 MySQL 改为 `3307:3306`，则 `MYSQL_PORT=3307`）。
+该脚本创建 `kb_platform` 库，并可选创建专用账号 `kb`（默认密码见脚本内注释）。
 
 ### 2. 启动后端
 
 ```bash
 cd backend
-cp .env.example .env        # 按需修改数据库口令、JWT_SECRET、模型配置
+cp .env.example .env        # 若尚无 .env；按实际情况填写数据库账号与模型配置
 
 uv sync                     # 安装依赖（已配置清华镜像，见 uv.toml）
-uv run python -m app.seed   # 建表 + 菜单权限点 + 初始管理员
+uv run python -m app.seed   # 建表 + 菜单权限点 + 初始管理员 + 演示部门/角色
 
 uv run python -m app.main   # 启动，默认 http://127.0.0.1:8080
 ```
@@ -86,6 +102,8 @@ uv run python -m app.main   # 启动，默认 http://127.0.0.1:8080
 ```bash
 curl http://127.0.0.1:8080/healthz          # 存活探针
 curl http://127.0.0.1:8080/healthz/ready    # 就绪探针（检查 MySQL）
+uv run python -m scripts.smoke_test_api         # 认证与组织权限冒烟测试（31 项）
+uv run python -m scripts.smoke_test_knowledge   # 知识台账与导入任务冒烟测试（28 项）
 ```
 
 接口文档：http://127.0.0.1:8080/docs
@@ -111,29 +129,55 @@ cd frontend && npm run build
 
 | 任务 | 内容 | 状态 |
 |------|------|------|
-| T-01 | 后端骨架：配置中心、统一响应、错误码、异常处理、结构化日志、健康检查 | ✅ 已完成 |
-| T-02 | 数据层：全部 ORM 模型、建表脚本、菜单权限点与管理员种子数据 | ✅ 已完成 |
-| T-03 | 基础设施：docker compose（MySQL/MongoDB/Milvus/MinIO/Attu） | ✅ 已完成 |
-| T-04 | 前端骨架：工程配置、路由守卫、布局、用户态、axios 拦截器、权限指令 | ✅ 已完成 |
-| T-05 ~ T-37 | 认证、RBAC、知识导入解析、鉴权引擎、问答、看板、知识沉淀、端到端交付 | ⏳ 待开发 |
+| T-01 | 后端骨架：配置中心、统一响应、错误码、异常处理、结构化日志、健康检查 | ✅ |
+| T-02 | 数据层：14 张表的 ORM 模型、建表脚本、菜单权限点与管理员种子数据 | ✅ |
+| T-03 | 基础设施：docker compose（依赖服务归入 local-stack，默认复用宿主机实例） | ✅ |
+| T-04 | 前端骨架：工程配置、路由守卫、布局、用户态、axios 拦截器、权限指令 | ✅ |
+| T-05 | 认证：登录 / JWT 签发解析 / 当前用户信息（含权限点与菜单树） | ✅ |
+| T-06 | RBAC：操作权限守卫、菜单树按权限裁剪与空目录剪除 | ✅ |
+| T-07 | 组织 CRUD：部门树、用户账号、角色管理 | ✅ |
+| T-08 | 角色权限分配：权限树读写（覆盖式），非法 ID 拦截 | ✅ |
+| T-09 | 前端组织管理页：部门树维护、用户管理、角色管理与权限分配树 | ✅ |
+| T-10 | 知识单元 CRUD：台账检索、编辑（PATCH 语义）、启停用、删除级联清理、格式清单 | ✅ |
+| T-11 | 上传与任务登记：批量上传、格式白名单、对象存储落地、doc_id 与任务表 | ✅ |
+| T-12 ~ T-37 | 导入解析 DAG、鉴权引擎、问答、看板、知识沉淀、端到端交付 | ⏳ |
 
-> 骨架阶段说明：登录页可正常打开，但 `/api/auth/login` 等业务接口 **尚未实现**（属 T-05 范围），
-> 点击登录会收到后端的 404 响应，这是预期行为。
+> - **T-05~T-08**：31 项冒烟测试通过（`scripts/smoke_test_api.py`）——登录、越权拦截（20002）、
+>   权限点与菜单裁剪、组织 CRUD、角色授权读写、参数校验与测试数据清理。
+>   T-09 完成后，「登录 → 控制台 → 用户/角色/部门维护 → 角色权限分配」界面链路已打通。
+> - **T-10/T-11**：28 项冒烟测试通过（`scripts/smoke_test_knowledge.py`）——7 类格式清单、
+>   批量上传（部分成功）、MinIO 实际写入、台账与详情、编辑、导入任务查询、
+>   删除级联清理（对象存储对象与权限条目均已清除）、越权拦截。
+> - 上传后的任务**停留在 `pending`**：导入执行引擎属 T-12 范围，当前仅完成"任务登记"，
+>   前端会显示「处理中」但不会推进，这是预期行为。
 
-## 已完成部分的验证方式
+## 已实现接口
 
-```bash
-# 后端
-cd backend && uv run python -c "import app.main; print('应用可导入')"
-uv run python -m app.main            # 启动后访问 /healthz 与 /docs
-
-# 前端
-cd frontend && npm run build         # 构建通过则骨架无误
-```
+| 方法 | 路径 | 权限点 | 说明 |
+|------|------|--------|------|
+| POST | `/api/auth/login` | 公开 | 登录，返回 token 与用户信息 |
+| GET | `/api/auth/me` | 登录 | 当前用户信息（含 perms / menus） |
+| POST | `/api/auth/logout` | 登录 | 登出（前端清除凭证） |
+| GET | `/api/menu/mine` | 登录 | 当前用户菜单树 |
+| GET | `/api/menu/tree` | `role:perm` | 全量菜单树（含按钮） |
+| GET | `/api/dept/tree` | `dept:list` 等 | 部门树 |
+| POST/PUT/DELETE | `/api/dept[/{id}]` | `dept:create/update/delete` | 部门维护 |
+| GET | `/api/user/list` | `user:list` 等 | 用户列表（分页） |
+| POST/PUT/DELETE | `/api/user[/{id}]` | `user:create/update/delete` | 用户维护 |
+| GET | `/api/role/list` | `role:list` 等 | 角色列表 |
+| POST/PUT/DELETE | `/api/role[/{id}]` | `role:create/update/delete` | 角色维护 |
+| GET/PUT | `/api/role/{id}/menus` | `role:perm` | 角色权限分配（覆盖式） |
+| GET | `/api/knowledge/supported-formats` | `knowledge:*` | 支持的 7 类文档格式与扩展名 |
+| POST | `/api/knowledge/upload` | `knowledge:import` | 批量上传（multipart，返回 accepted / rejected） |
+| GET | `/api/knowledge/status/{task_id}` | `knowledge:*` | 导入任务阶段与状态 |
+| GET | `/api/knowledge/list` | `knowledge:list` 等 | 知识单元台账（分页、多条件筛选、含权限摘要） |
+| GET/PUT/DELETE | `/api/knowledge/{doc_id}` | `knowledge:query/update/delete` | 详情 / 编辑（PATCH 语义）/ 删除（级联清理） |
+| GET | `/healthz`、`/healthz/ready` | 公开 | 健康检查 |
 
 ## 关键约定
 
-- **统一响应**：除 SSE 与文件流外，接口一律返回 `{ code, message, data }`，`code === 0` 为成功。
+- **统一响应**：除 SSE 与文件流外，接口一律返回 `{ code, message, data }`，`code === 0` 为成功；
+  字段对外输出 camelCase（内部 snake_case）。
 - **错误码段位**：`100xx` 参数校验 · `200xx` 认证权限 · `300xx` 业务规则 · `400xx` 依赖系统。
 - **鉴权**：除登录接口外均需 `Authorization: Bearer <token>`；操作权限以后端校验为准，前端指令仅作展示收敛。
 - **数据权限**：知识单元默认无任何权限（拒绝优先），切片缺失 `doc_id` 锚点一律拒绝。

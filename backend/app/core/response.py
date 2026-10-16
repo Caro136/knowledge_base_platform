@@ -23,9 +23,23 @@ class ApiResponse(BaseModel, Generic[T]):
     data: T | None = Field(default=None, description="业务数据")
 
 
+def _dump(value: Any) -> Any:
+    """按对外别名（camelCase）递归序列化 Pydantic 模型。"""
+    if isinstance(value, BaseModel):
+        return value.model_dump(by_alias=True, mode="json")
+    if isinstance(value, list):
+        return [_dump(item) for item in value]
+    if isinstance(value, tuple):
+        return [_dump(item) for item in value]
+    return value
+
+
 def ok(data: Any = None, message: str = "ok") -> dict[str, Any]:
-    """构造成功响应字典。"""
-    return {"code": Code.OK, "message": message, "data": data}
+    """构造成功响应字典。
+
+    显式按别名序列化，不依赖序列化器的默认行为，保证对外字段恒为 camelCase。
+    """
+    return {"code": Code.OK, "message": message, "data": _dump(data)}
 
 
 def fail(code: int, message: str | None = None, data: Any = None) -> dict[str, Any]:

@@ -13,7 +13,7 @@
 
 | 编号 | 约束 | 结论 |
 |------|------|------|
-| C1 | 技术栈 | 沿用参考基线全栈：Vue3 + Element Plus / Python FastAPI + LangGraph / MySQL + Milvus + MongoDB + MinIO |
+| C1 | 技术栈 | 沿用参考基线全栈：Vue3 + Element Plus / Python FastAPI + LangGraph / MySQL + Milvus + MongoDB + 对象存储（**MinIO 镜像已下架，实施改为本地文件系统，见 §12**） |
 | C2 | 部署与算力 | 内网单机 + GPU（嵌入 BGE-M3 与重排模型本地 GPU 部署，生成模型走云 API） |
 | C3 | 架构风格 | 单体分层（Modular Monolith） |
 
@@ -75,7 +75,7 @@ flowchart TB
     DB[(MySQL 8.0)]
     VDB[(Milvus 2.5)]
     MDB[(MongoDB 7.0)]
-    OSS[(MinIO)]
+    OSS[(对象存储: 本地目录)]
   end
 
   subgraph EXT[外部能力]
@@ -129,7 +129,7 @@ flowchart TB
 | 关系库 | MySQL | 8.0 | 用户/权限/知识元数据/看板/FAQ/缺口 | C1 既定 |
 | 向量库 | Milvus | 2.5.x（standalone） | 切片稠密 + 稀疏向量混合检索 | C1 既定 |
 | 文档库 | MongoDB | 7.0 | AI 会话与消息历史 | C1 既定 |
-| 对象存储 | MinIO | — | 原始文档、文档内图片 | C1 既定 |
+| 对象存储 | **本地文件系统**（MinIO 可选后端） | — | 原始文档、文档内图片；MinIO 官方镜像已下架，见 §12 | 实施调整 |
 | 认证 | JWT（HS256） + bcrypt | — | 无状态登录态、密码哈希 | C1 既定 |
 | 生成模型 | 云 LLM API（可插拔） | — | 答案生成、问题改写、商品名识别 | `[设计假设]` 具体厂商见 §11 |
 | 视觉模型 | 云 VLM API（可插拔） | — | 图片知识语义化（决策 D1 必需） | `[设计假设]` |
@@ -231,8 +231,8 @@ flowchart LR
 
 **部署要点**
 
-1. **端口收敛**：仅应用端口（默认 8080）对内网开放；MySQL 3306、MongoDB 27017、Milvus 19530、MinIO 仅容器网络内可达，不映射宿主机（如需运维访问，另行开通跳板机）。
-2. **对象存储复用**：Milvus 自带的 MinIO 与业务对象存储**复用同一实例、不同 bucket**（如 `milvus-bucket` 与 `kb-files`），减少一个中间件；若运维要求隔离，可拆为独立实例。
+1. **端口收敛**：仅应用端口（默认 8080）对内网开放；MySQL、MongoDB、Milvus 默认**复用宿主机既有实例**（由 `backend/.env` 指向），本项目不再额外暴露端口。
+2. **对象存储**：默认使用本地文件系统目录（`STORAGE_BACKEND=local`，`LOCAL_STORAGE_DIR=./data/files`），零中间件依赖、单机部署最简；若具备可用的 S3 兼容服务，把 `STORAGE_BACKEND` 切为 `minio` 即可——业务代码经统一存储抽象访问，无需改动。**注：本文档其他位置出现的 MinIO 相关描述，实施时统一按此理解**（详见 §12）。
 3. **GPU 模型位置**：嵌入与重排模型运行在**应用进程内**（同机加载权重，通过全局推理锁串行化），而非独立推理服务——见 ADR-007。
 4. **前端产物**：构建后由 FastAPI 静态托管，不单独部署 Nginx。
 5. **出网策略**：应用容器需能访问云 LLM / VLM / 解析服务；若内网禁出网，则模型与解析服务必须本地化（见 §11 Q3）。
@@ -685,6 +685,26 @@ sequenceDiagram
 | S10 | FAQ 数据权限默认语义（Q8：未配置=公开 or 拒绝） | 影响 `filter_faq_ids` 的 fail-open / fail-closed 实现 | 业务方 |
 | S11 | 是否需要独立的「审计/合规」角色与审计查询页（Q14/Q41） | 影响权限点与看板扩展 | 业务方 / 合规 |
 | S12 | 是否启用联网搜索（Q18）与 RAG 评测（Q19） | 联网搜索需在查询图中加一路召回；评测需额外交付 `eval/` 工具 | 需求提出方 |
+
+---
+
+## 12. 实施调整记录（T-01 ~ T-08）
+
+> 本节记录实施过程中与原设计的偏差，保持「文档—实现」一致，避免后续阅读者按旧描述理解系统。
+> 本节之后文中若仍出现 MinIO 字样（如 §2.2 依赖表、§7.1 时序图、§10 任务表），一律按 I-01 理解。
+
+| 编号 | 调整项 | 原设计 | 实际实施 | 原因 |
+|------|--------|--------|---------|------|
+| **I-01** | 对象存储 | MinIO（本项目 Docker 容器） | **内网虚拟机上的 MinIO 实例**（`STORAGE_BACKEND=minio`，地址与账号见 `backend/.env`）；本地文件系统（`local`）保留为可选后端 | MinIO 官方镜像已从 Docker Hub 下架（`minio/minio`、`bitnami/minio` 均 403，`quay.io/minio/minio` 401），无法由本项目 compose 启动容器；改由内网虚拟机实例提供，已连通验证 |
+| **I-02** | 依赖服务部署 | docker compose 全量启动 | **默认复用宿主机既有实例**：compose 中 mysql / mongo / etcd / milvus / attu / minio 全部归入 `local-stack` profile，默认不启动 | 用户决策；宿主机已有 MySQL(3306) / MongoDB(27017) / Milvus(19530) 实例 |
+| **I-03** | local-stack 端口 | 3306 / 27017 / 19530 / 8000 | 3307 / 27018 / 19531 / 8001 | 避免与宿主机既有服务冲突 |
+| **I-04** | 数据库账号 | 由 compose 环境变量内建 kb 账号 | `.env` 指向既有实例（默认 root）；另提供 `scripts/init_mysql.sql` 建库并可选创建 kb 账号 | 复用既有实例时无法由容器初始化账号与库 |
+| **I-05** | 日志编码 | 未涉及 | 输出被重定向（管道/文件）时强制 UTF-8，终端直连保留系统编码 | 修复 Windows 下 cp936 编码导致的中文日志乱码 |
+
+**实施新增的支撑产物**（原任务分解未列，实施需要）：
+
+- `backend/scripts/init_mysql.sql`：在既有 MySQL 上创建库与可选账号
+- `backend/scripts/smoke_test_api.py`：认证与组织权限接口的冒烟测试（31 项断言，含测试数据自动清理）
 
 ---
 
