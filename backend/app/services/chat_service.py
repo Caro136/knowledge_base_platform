@@ -25,6 +25,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.codes import Code
+from app.core.config import settings
 from app.core.exceptions import BizError
 from app.db.session import SessionLocal
 from app.models import User
@@ -187,11 +188,17 @@ def _run_query(task: StreamTask) -> None:
             items = [ReferenceOut(**item).model_dump(by_alias=True) for item in references]
             _emit(task, "references", {"items": items})
 
-        # 知识缺口判定（决策 D2）：确实检索过 + 没有任何有权上下文 + 不是权限拒绝
-        is_gap = not has_context and not denied
+        # 「权限受限」与「知识缺口」的区分（决策 D2）：
+        # 仅当被拦截内容占召回主体时才认定为权限拒绝；若只是召回里混进了个别无权文档、
+        # 而用户真正想问的内容本就缺失，仍应记为知识缺口——否则只要库中存在任何
+        # 无权文档，缺口识别就会永久失效（召回总会带出一些无权项）。
+        recalled_docs = {doc_id for doc_id in recalled}
+        denied_ratio = (len(denied) / len(recalled_docs)) if recalled_docs else 0.0
+        permission_blocked = denied_ratio >= settings.GAP_DENIED_RATIO
+        is_gap = not has_context and not permission_blocked
 
-        # 权限受限：存在相关知识但均无权访问 —— 不调用大模型，直接给出安全提示
-        if not has_context and denied:
+        # 权限受限：相关知识存在但无权访问 —— 不调用大模型，直接给出安全提示
+        if not has_context and permission_blocked:
             _emit(task, "notice", {"type": "permission_denied", "message": PERMISSION_DENIED_NOTICE})
             _finalize(task, PERMISSION_DENIED_NOTICE)
             return
